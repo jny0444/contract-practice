@@ -1,39 +1,90 @@
-// SPDX-License-Identifier: SEE LICENSE IN LICENSE
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-contract MultiSig {
+contract MultiSigWallet {
     address[] public owners;
-    uint256 public constant MIN_SIGNATURES = 2;
-
     mapping(address => bool) public isOwner;
+    uint256 public required;
 
     struct Transaction {
         address to;
         uint256 value;
-        bytes32 data;
+        bytes data;
         bool executed;
-        uint256 confirmations;
+        uint256 numApprovals;
     }
 
     Transaction[] public transactions;
+    mapping(uint256 => mapping(address => bool)) public approved;
 
-    constructor(address[] memory _owners) {
-        require(_owners.length >= MIN_SIGNATURES, "Not enough owners");
-        owners = _owners;
-        for (uint256 i = 0; i < _owners.length; i++) {
-            require(_owners[i] != address(0), "Owner cannot be zero address");
-            require(!isOwner[_owners[i]], "Duplicate owner");
-            isOwner[_owners[i]] = true;
-        }
+    modifier onlyOwner() {
+        require(isOwner[msg.sender], "Not owner");
+        _;
     }
 
-    function submitTransaction(address _to, uint256 _value, bytes32 _data) public {
-        require(isOwner[msg.sender], "Only owners can submit transactions");
-        require(_to != address(0), "Invalid recipient address");
-        require(_value > 0, "Transaction value must be greater than zero");
-        require(_data.length > 0, "Transaction data cannot be empty");
-        require(_to != address(this), "Cannot send to self");
+    modifier txExists(uint256 _txId) {
+        require(_txId < transactions.length, "Tx does not exist");
+        _;
+    }
 
-        transactions.push(Transaction({to: _to, value: _value, data: _data, executed: false, confirmations: 0}));
+    modifier notApproved(uint256 _txId) {
+        require(!approved[_txId][msg.sender], "Already approved");
+        _;
+    }
+
+    modifier notExecuted(uint256 _txId) {
+        require(!transactions[_txId].executed, "Already executed");
+        _;
+    }
+
+    constructor(address[] memory _owners, uint256 _required) {
+        require(_owners.length > 0, "No owners");
+        require(_required > 0 && _required <= _owners.length, "Invalid required number");
+
+        for (uint256 i = 0; i < _owners.length; i++) {
+            address owner = _owners[i];
+            require(owner != address(0), "Invalid owner");
+            require(!isOwner[owner], "Duplicate owner");
+
+            isOwner[owner] = true;
+            owners.push(owner);
+        }
+
+        required = _required;
+    }
+
+    receive() external payable {}
+
+    function submit(address _to, uint256 _value, bytes memory _data) external onlyOwner {
+        transactions.push(Transaction({to: _to, value: _value, data: _data, executed: false, numApprovals: 0}));
+    }
+
+    function approve(uint256 _txId) external onlyOwner txExists(_txId) notApproved(_txId) notExecuted(_txId) {
+        approved[_txId][msg.sender] = true;
+        transactions[_txId].numApprovals += 1;
+    }
+
+    function revoke(uint256 _txId) external onlyOwner txExists(_txId) notExecuted(_txId) {
+        require(approved[_txId][msg.sender], "Not approved yet");
+        approved[_txId][msg.sender] = false;
+        transactions[_txId].numApprovals -= 1;
+    }
+
+    function execute(uint256 _txId) external onlyOwner txExists(_txId) notExecuted(_txId) {
+        Transaction storage transaction = transactions[_txId];
+        require(transaction.numApprovals >= required, "Not enough approvals");
+
+        transaction.executed = true;
+        (bool success,) = transaction.to.call{value: transaction.value}(transaction.data);
+        require(success, "Transaction failed");
+    }
+
+    function getTransaction(uint256 _txId)
+        external
+        view
+        returns (address to, uint256 value, bytes memory data, bool executed, uint256 numApprovals)
+    {
+        Transaction storage transaction = transactions[_txId];
+        return (transaction.to, transaction.value, transaction.data, transaction.executed, transaction.numApprovals);
     }
 }

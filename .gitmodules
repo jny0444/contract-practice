@@ -1,0 +1,6 @@
+[submodule "advanced/compound-style-lending-protocol/lib/forge-std"]
+	path = advanced/compound-style-lending-protocol/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "advanced/compound-style-lending-protocol/lib/openzeppelin-contracts"]
+	path = advanced/compound-style-lending-protocol/lib/openzeppelin-contracts
+	url = https://github.com/openzeppelin/openzeppelin-contracts
